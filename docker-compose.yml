@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # PostgreSQL — stores rate limit configurations and user data
+  postgres:
+    image: postgres:15-alpine
+    container_name: rate-limiter-postgres
+    environment:
+      POSTGRES_DB: ratelimiter
+      POSTGRES_USER: ratelimiter
+      POSTGRES_PASSWORD: ratelimiter123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ratelimiter -d ratelimiter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis — centralized rate limit state (Phase 2 distributed limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: rate-limiter-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Spring Boot Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rate-limiter-app
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ratelimiter
+      SPRING_DATASOURCE_USERNAME: ratelimiter
+      SPRING_DATASOURCE_PASSWORD: ratelimiter123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      RATE_LIMITER_ALGORITHM: TOKEN_BUCKET
+      RATE_LIMITER_DEFAULT_LIMIT: 100
+      RATE_LIMITER_DEFAULT_WINDOW_SECONDS: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
